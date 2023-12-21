@@ -33,7 +33,6 @@ Patch features extraction
 We segmented tissue using saturation thresholding and extracted non-overlapping 512x512 tissue regions at 40x magnification. We then downsampled these to 256x256 patches at 20x magnification and extracted [1,1024] features from each patch using a ResNet50 encoder pretrained on ImageNet:
 
 ``` shell
-## 40x 256x256 patches for use in 40x experiments
 python create_patches_fp.py --source "/mnt/data/Katie_WSI/edrive" --save_dir "/mnt/results/patches/ovarian_leeds_mag40x_patch512_DGX_fp" --patch_size 512 --step_size 512 --seg --patch --stitch 	
 python extract_features_fp.py --hardware DGX --custom_downsample 2 --model_type 'resnet50' --data_h5_dir "/mnt/results/patches/ovarian_leeds_mag40x_patch512_DGX_fp" --data_slide_dir "/mnt/data/Katie_WSI/edrive" --csv_path "dataset_csv/set_edrivepatches_ESGO_train_staging.csv" --feat_dir "/mnt/results/features/ovarian_leeds_resnet50_20x_features_DGX" --batch_size 32 --slide_ext .svs 
 ``` 
