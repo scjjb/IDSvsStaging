@@ -1,70 +1,112 @@
-## Predicting Ovarian Cancer Treatment Response in Histopathology using Hierarchical Vision Transformers and Multiple Instance Learning 
+## Comparative Evaluation of Ovarian Carcinoma Subtyping in Primary versus Interval Debulking Surgery Specimen Whole Slide Images using Artificial Intelligence
 <img src="CISTIB logo.png" align="right" width="240"/>
 
-*HIPT-ABMIL is a transformer-based approach to classifying histopathology slides which leverages spatial information for better prognostication.* 
+*Pre-treatment (primary) and post-treatment (IDS) specicimens are highly visually distinct, but both are beneficial in training an ovarian cancer subtyping model*
 
-<img src="HIPT-AMBIL-ModelDiagram-Background-min.png" align="centre" width="900"/>
+<img src="ABMILarchitecture-min.png" align="centre" width="900"/>
 
-This repo was created as part of an entry to the MICCAI 2023 challenge [*automated prediction of treatment effectiveness in ovarian cancer using histopathological images* (ATEC23)](https://github.com/cwwang1979/MICCAI_ATEC23challenge). The training data was made available through [TCIA](https://wiki.cancerimagingarchive.net/pages/viewpage.action?pageId=83593077).
+Inital results were [presented at the 24th European Congress on Gynaecological Oncology (ESGO 2023)](https://ijgc.bmj.com/content/33/Suppl_3/A429.abstract), and final results submitted for publication in a journal.  
 
-HIPT-CLAM is a multiple instance learning (MIL) approach in which features are extracted from 4096x4096 pixel regions using the pretrained hierarchical transformer model [HIPT_4K](https://github.com/mahmoodlab/HIPT) and these features are aggregated to generate a slide-level representation using the attention-based multiple instance learning (ABMIL) approach [CLAM](https://github.com/mahmoodlab/CLAM). 
+in which the performance of an attention-based multiple instance learning (ABMIL) model was compared for classifying ovarian cancer subtypes when trained with only primary surgery WSIs versus both primary and interval debulking surgery (IDS) WSIs. 
 
+## Hyperparameters
+Final Hyperparamters Determined by Hyperparameter Tuning: 
+| Training Set | Learning Rate | Weight Decay | First Moment Decay | Second Moment Decay | Attention Layer Size | Dropout | Max Patches |
+| :-------: | :-------------: | :------------: |:------------------:|:-------------------: | :--------------------: | :-------: | :-----------: |
+| Staging-Only    | 5e-4          | 1e-5         |        0.95        | 0.99                | 256                  | 0.7     | 8000       |
+| Staging+IDS     | 5e-4          | 1e-4         |        0.99        | 0.99                | 512                  | 0.6     | 10000       |
+| Staging+Staging | 5e-4          | 1e-4         |        0.95        | 0.99                | 512                  | 0.6     | 6000        |
 
-## Code Runs
-The following code was used in producing the results submitted as part of the ATEC23 challenge.
+Hyperparameters were tuned in 4 stages in which 1-3 individual hyperparameters were altered and the rest were frozen.
+- Stage 1: Learning Rate, Dropout, Max Patches
+- Stage 2: Weight Decay, Attention Layer Size
+- Stage 3 (Only if Attention Layer Size changed): Dropout, Max Patches
+- Stage 4: First Moment Decay, Second Moment Decay
+
+## Code Examples - Final Results
+The following code was used in producing the final results, including hyperparameter tuning and evaluation. Initial hyperparameters were taken from the 20x magnification model in [our previous work](https://github.com/scjjb/Ovarian_Subtype_Mags). 
 
 <details>
 <summary>
-Data acquisition
+Patch features extraction
 </summary>
-Before running any code, we downloaded the training data from TCIA, and turned the single-level svs files into multi-level (pyramidal) svs files using libvips. Some level of compression was necessary here to reduce file sizes, though we found compression Q90 indistinguishable from uncompressed images. Single-slide example:
-  
-``` shell
-vips tiffsave "I:\treatment_data\2-1613704B.svs" "I:\treatment_data\pyramid_jpeg90compress\2-1613704B.svs" --compression jpeg --Q 90 --tile --pyramid
-```
-</details>
+We segmented tissue using saturation thresholding and extracted non-overlapping 512x512 tissue regions at 40x magnification. We then downsampled these to 256x256 patches at 20x magnification and extracted [1,1024] features from each patch using a ResNet50 encoder pretrained on ImageNet:
 
-<details>
-<summary>
-Tissue region extraction
-</summary>
-We segmented tissue using Otsu thresholding and extracted non-overlapping 4096x4096 tissue regions:
-  
 ``` shell
-python create_patches_fp.py --source "../mount_i/treatment_data/pyramid_jpeg90compress" --save_dir "../mount_outputs/extracted_mag20x_patch4096_fp_updated" --patch_size 4096 --step_size 4096 --seg --patch --stitch --sthresh 15 --mthresh 5 --use_otsu --closing 100
+## 40x 256x256 patches for use in 40x experiments
+python create_patches_fp.py --source "/mnt/data/Katie_WSI/edrive" --save_dir "/mnt/results/patches/ovarian_leeds_mag40x_patch512_DGX_fp" --patch_size 512 --step_size 512 --seg --patch --stitch 	
+python extract_features_fp.py --hardware DGX --custom_downsample 2 --model_type 'resnet50' --data_h5_dir "/mnt/results/patches/ovarian_leeds_mag40x_patch512_DGX_fp" --data_slide_dir "/mnt/data/Katie_WSI/edrive" --csv_path "dataset_csv/set_edrivepatches_ESGO_train_staging.csv" --feat_dir "/mnt/results/features/ovarian_leeds_resnet50_20x_features_DGX" --batch_size 32 --slide_ext .svs 
 ``` 
 </details>
 
-<details>
-<summary>
-Feature extraction
-</summary>
-We extracted [1,192] features from each 4096x4096 region using HIPT_4K:
-  
-``` shell
-python extract_features_fp.py --use_transforms 'HIPT' --model_type 'HIPT_4K' --data_h5_dir "../mount_outputs/extracted_mag20x_Q90_patch4096_fp_updated" --data_slide_dir "../mount_i/treatment_data/pyramid_jpeg90compress" --csv_path "dataset_csv/set_treatment.csv" --feat_dir "../mount_outputs/features/treatment_Q90_hipt4096_features_normalised_updatedsegmentation" --batch_size 1 --slide_ext .svs 
-```
-</details>
 
 <details>
 <summary>
-Hyperparameter tuning
+Hyperparameter Tuning
 </summary>
-Grid tuning was performed using RayTune with hyperparameter options defined within main.py. This example is from tuning fold 0 of the 5-fold cross-validation using HIPT-ABMIL: 
-  
+Models were tuned using configurations in the folder "tuning_configs", with a separate call used for each of the five cross-validation folds to allow for parallelisation:
+
 ``` shell
-python main.py --tuning --hardware DGX --tuning_output_file /mnt/results/tuning_results/main_treatment_Q90_betterseg_patience30mineverloss_3reps_noaugs_DGX_moreoptions_fold0.csv --num_tuning_experiments 3 --data_slide_dir "/mnt/data/ATEC_jpeg90compress" --min_epochs 0 --early_stopping --split_dir "treatment_5fold_100" --k 1 --results_dir /mnt/results --exp_code treatment_HIPTnormalised_Q90_betterseg_patience30mineverloss_3reps_noaugs_tuning_moreoptions_fold0 --subtyping --weighted_sample --bag_loss ce --task treatment --max_epochs 200 --model_type clam_sb --no_inst_cluster --log_data --csv_path 'dataset_csv/set_treatment.csv' --data_root_dir "/mnt/data" --features_folder treatment_Q90_hipt4096_features_normalised_updatedsegmentation
+## Staging+IDS tuning first stage first fold
+python main.py --tuning --hardware DGX --tuning_output_file /mnt/results/tuning_results/stagingplusIDS_updated_firsttuning_fold0.csv --min_epochs 0 --early_stopping --num_tuning_experiments 1 --split_dir "esgo_all_5fold_100" --k 1 --results_dir /mnt/results --exp_code stagingplusIDS_updated_1thtuning_fold0 --subtyping --weighted_sample --bag_loss balanced_ce --no_inst_cluster --task ovarian_5class --max_epochs 150 --model_type clam_sb --subtyping --csv_path 'dataset_csv/ESGO_train_all.csv' --data_root_dir "/mnt/results/features" --features_folder "ovarian_leeds_resnet50_20x_features_DGX" --tuning_config_file tuning_configs/esgo_stagingonly_updated_resnet50_20x_config1.txt
 ```
+
+After running all folds for a given magnification and tuning stage, the validation set balanced cross-entropy loss values were summarised into a csv for analysis:
+
+``` shell
+python combine_results.py --file_base_name "/mnt/results/tuning_results/stagingplusIDS_updated_firsttuning"
+```
+
 </details>
 
 <details>
 <summary>
 Model training
 </summary>
-The best model from the 5-fold cross-validation experiment (as judged by averaged validation set cross-entropy loss across three repeats and five folds) was trained:
-  
+The best model for each training set from hyperparameter tuning was trained:
+
 ``` shell
-python main.py --hardware DGX --max_patches_per_slide 15 --data_slide_dir "/mnt/data/ATEC_jpeg90compress" --min_epochs 0 --early_stopping --drop_out 0.0 --lr 0.0005 --reg 0.0001 --model_size hipt_smaller --split_dir "treatment_5fold_100" --k 5 --results_dir /mnt/results --exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_bestfromsecondbigtuning --subtyping --weighted_sample --bag_loss ce --task treatment --max_epochs 1000 --model_type clam_sb --no_inst_cluster --csv_path 'dataset_csv/set_treatment.csv' --data_root_dir "/mnt/data" --features_folder treatment_Q90_hipt4096_features_normalised_updatedsegmentation
+## Staging+IDS
+python main.py --hardware DGX --min_epochs 0 --early_stopping --drop_out 0.6 --lr 0.0005 --reg 0.0001 --max_patches_per_slide 10000 --beta1 0.99 --beta2 0.99 --eps 1e-8 --split_dir "esgo_all_5fold_100" --k 5 --results_dir /mnt/results --exp_code stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000 --subtyping --weighted_sample --bag_loss balanced_ce --no_inst_cluster --task ovarian_5class --max_epochs 1000 --model_type clam_sb --model_size small --subtyping --csv_path 'dataset_csv/ESGO_train_all.csv' --data_root_dir "/mnt/results/features" --features_folder "ovarian_leeds_resnet50_20x_features_DGX"
+```
+
+</details>
+
+<details>
+<summary>
+Model evaluation
+</summary>
+The models were evaluated on the test sets of the five-fold cross validation with 5000 iterations of bootstrapping:
+
+``` shell
+python eval.py --drop_out 0.6 --model_size small --models_exp_code stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_s1 --save_exp_code stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_bootstrapping --task ovarian_5class --model_type clam_sb --results_dir /mnt/results --data_root_dir "/mnt/results/features" --k 5 --features_folder "ovarian_leeds_resnet50_20x_features_DGX" --csv_path 'dataset_csv/ESGO_train_all.csv'
+python bootstrapping.py --num_classes 5 --model_names stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_bootstrapping --bootstraps 5000 --run_repeats 1 --folds 5
+```
+
+The models were also evaluated on the balanced hold-out test set with 5000 iterations of bootstrapping:
+``` shell
+python eval.py --drop_out 0.6 --model_size small --models_exp_code stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_s1 --save_exp_code stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_testset_bootstrapping --task ovarian_5class --model_type clam_sb --results_dir /mnt/results --data_root_dir "/mnt/results/features" --k 5 --features_folder "ovarian_leeds_resnet50_20x_features_DGX" --csv_path 'dataset_csv/ESGO_test_set.csv' --split_dir splits/esgo_test_splits
+python bootstrapping.py --num_classes 5 --model_names stagingplusids_updated_bestfromtuning_drop6_lr0005_reg0001_small_patch10000_testset_bootstrapping --bootstraps 5000 --run_repeats 1 --folds 5
+```
+
+</details>
+
+## Code Examples - ESGO
+The following code was used in producing the inital results presented at ESGO. This part did not include any hyperparameter tuning, and did not include an evaluation of an increased number of staging specimens alone. 
+
+<details>
+<summary>
+Model training
+</summary>
+
+Primary surgery specimens only
+``` shell
+python main.py --hardware PC --min_epochs 0 --early_stopping --drop_out 0.75 --lr 0.0001 --reg 0.0001 --max_patches_per_slide 5000 --split_dir "esgo_staging_alltrain_100" --k 1 --results_dir results --exp_code esgo_staging_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split --weighted_sample --bag_loss ce --no_inst_cluster --task ovarian_5class --max_epochs 200 --model_type clam_sb --model_size small --log_data --subtyping --csv_path 'dataset_csv/ESGO_train_staging.csv' --data_root_dir "../mount_i/features" --features_folder "ovarian_dataset_features_256_patches_20x"
+```
+
+Primary surgery plus IDS specimens
+``` shell
+python main.py --hardware PC --min_epochs 0 --early_stopping --drop_out 0.75 --lr 0.0001 --reg 0.0001 --max_patches_per_slide 5000 --split_dir "esgo_all_alltrain_100" --k 1 --results_dir results --exp_code esgo_all_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_plusidstraining --weighted_sample --bag_loss ce --no_inst_cluster --task ovarian_5class --max_epochs 200 --model_type clam_sb --model_size small --log_data --subtyping --csv_path 'dataset_csv/ESGO_train_all.csv' --data_root_dir "../mount_i/features" --features_folder "ovarian_dataset_features_256_patches_20x"
 ```
 </details>
 
@@ -72,57 +114,20 @@ python main.py --hardware DGX --max_patches_per_slide 15 --data_slide_dir "/mnt/
 <summary>
 Model evaluation
 </summary>
-The model was evaluated on the test sets of the five-fold cross validation with 100,000 iterations of bootstrapping:
-  
+
+Primary surgery specimens only
 ``` shell
-python eval.py --drop_out 0.0 --model_size hipt_smaller --models_exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_bestfromsecondbigtuning_s1 --save_exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_bestfromsecondbigtuning_bootstrapping --task treatment --model_type clam_sb --results_dir /mnt/results --data_root_dir "/mnt/data" --k 5 --features_folder "treatment_Q90_hipt4096_features_normalised_updatedsegmentation" --csv_path 'dataset_csv/set_treatment.csv' 
-python bootstrapping.py --num_classes 2 --model_names  treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_bestfromsecondbigtuning_bootstrapping --bootstraps 100000 --run_repeats 1 --folds 5
+python eval.py --drop_out 0.75 --model_size small --models_exp_code esgo_staging_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_s1 --save_exp_code esgo_staging_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_bootstrapping --task ovarian_5class --model_type clam_sb --results_dir results --data_root_dir "../mount_i/features" --fold 100 --features_folder "ovarian_dataset_features_256_patches_20x" --csv_path 'dataset_csv/ESGO_test_set.csv'
+python bootstrapping.py --num_classes 5 --model_names esgo_staging_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_bootstrapping --bootstraps 100000 --run_repeats 1 --folds 1
 ```
 
-The cross-validation results for this optimal HIPT-ABMIL model were as follows:
-
+Primary surgery plus IDS specimens
 ``` shell
- Confusion Matrix:
- [[ 76  49]
- [ 29 128]]
-
- average ce loss:  0.4858174402095372 (not bootstrapped)
- AUC mean:  [0.8206680412411297]  AUC std:  [0.02530094639907452]
- F1 mean:  [0.7659177381223935]  F1 std:  [0.02579712919409385]
- accuracy mean:  [0.7234604255319149]  accuracy std:  [0.02667653193254119]
- balanced accuracy mean:  [0.7117468943178861]  balanced accuracy std:  [0.026864606981070703]
+python eval.py --drop_out 0.75 --model_size small --models_exp_code esgo_all_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_plusidstraining_s1 --save_exp_code esgo_all_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_plusidstraining_bootstrapping --task ovarian_5class --model_type clam_sb --results_dir results --data_root_dir "../mount_i/features" --fold 100 --features_folder "ovarian_dataset_features_256_patches_20x" --csv_path 'dataset_csv/ESGO_test_set.csv'
+python bootstrapping.py --num_classes 5 --model_names esgo_all_drop75lr0001reg0001_5000patches_ABMILsb_ce_802000split_plusidstraining_bootstrapping --bootstraps 100000 --run_repeats 1 --folds 1
 ```
+
 </details>
-
-<details>
-<summary>
-Challenge test set
-</summary>
-
-First, the test set images were pre-processed into pyramid svs files through the same approach as used for the training set images (though these originated as .bmp files rather than .svs files), for example:
-
-``` shell
-vips tiffsave "I:\treatment_data\2023MICCAI_testing_set\0.BMP" "I:\treatment_data\testpyramid_jpeg90compress\0.svs" --compression jpeg --Q 90 --tile --pyramid
-```
-
-Patches were selected (one per slide due to the size of these images) and features extracted:
-``` shell
-python create_patches_fp.py --source "../mount_i/treatment_data/testpyramid_jpeg90compress" --save_dir "../mount_outputs/extracted_mag20x_patch4096_fp_testset_updated_Q90" --patch_size 4096 --step_size 4096 --seg --patch --stitch --pad_slide --sthresh 15 --mthresh 5 --use_otsu --closing 200 --atfilter 8
-python extract_features_fp.py --use_transforms 'HIPT' --model_type 'HIPT_4K' --data_h5_dir "../mount_outputs/extracted_mag20x_patch4096_fp_testset_updated_Q90" --data_slide_dir "../mount_i/treatment_data/testpyramid_jpeg90compress" --csv_path "dataset_csv/set_treatment_test.csv" --feat_dir "../mount_outputs/features/treatment_hipt4096_features_normalised_test_updated_Q90patches" --batch_size 1 --slide_ext .svs
-```
-
-The hyperparameters of the best-performing model on internal data was applied to create an ensemble of four models:
-``` shell
-python main.py --hardware DGX --max_patches_per_slide 15 --data_slide_dir "../mount_i/treatment_data/pyramid_jpeg90compress" --min_epochs 0 --early_stopping --drop_out 0.0 --lr 0.0005 --reg 0.0001 --model_size hipt_smaller --split_dir "treatment_submission_folds" --k 4 --results_dir results --exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_4fold_7525test --subtyping --weighted_sample --bag_loss ce --task treatment --max_epochs 1000 --model_type clam_sb --no_inst_cluster --csv_path 'dataset_csv/set_treatment_plus_test.csv' --data_root_dir "../mount_outputs/features/" --features_folder treatment_Q90_hipt4096_features_normalised_updatedsegmentation
-```
-
-Finally, predictions were made on the TMA challenge test set, with the median of these predictions submitted for the challenge:
-``` shell
-python eval.py --drop_out 0.0 --model_size hipt_smaller --models_exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_4fold_7525test_s1 --save_exp_code treatment_HIPTnormalised_Q90_betterseg_15patches_drop0lr0005reg0001_modelhiptsmaller_ABMILsb_ce_20x_5fold_noaugs_4fold_7525test_Q90patchestest_bootstrapping --task treatment --model_type clam_sb --results_dir results --data_root_dir "../mount_outputs/features/" --k 4 --features_folder "treatment_Q90_hipt4096_features_normalised_updatedsegmentation" --csv_path 'dataset_csv/set_treatment_plus_test.csv'
-```
-</details>
-
-
 
 ## Reference
-This code is an extension of our [previous repository](https://github.com/scjjb/DRAS-MIL), which itself was forked from the [CLAM repository](https://github.com/mahmoodlab/CLAM) with corresponding [paper](https://www.nature.com/articles/s41551-020-00682-w). Code is also used from the [HIPT repository](https://github.com/mahmoodlab/HIPT), including pretrained model weights. This repository and the original CLAM repository are both available for non-commercial academic purposes under the GPLv3 License.
+This code is an extension of our [previous repository](https://github.com/scjjb/DRAS-MIL), which itself was forked from the [CLAM repository](https://github.com/mahmoodlab/CLAM) with corresponding [paper](https://www.nature.com/articles/s41551-020-00682-w). This repository and the original CLAM repository are both available for non-commercial academic purposes under the GPLv3 License.
