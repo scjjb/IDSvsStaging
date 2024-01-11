@@ -13,9 +13,9 @@ in which the performance of an attention-based multiple instance learning (ABMIL
 Final Hyperparamters Determined by Hyperparameter Tuning: 
 | Training Set | Learning Rate | Weight Decay | First Moment Decay | Second Moment Decay | Attention Layer Size | Dropout | Max Patches |
 | :-------: | :-------------: | :------------: |:------------------:|:-------------------: | :--------------------: | :-------: | :-----------: |
-| Staging-Only    | 5e-4          | 1e-5         |        0.95        | 0.99                | 256                  | 0.7     | 8000       |
+| Staging-Only    | 5e-4          | 1e-5         |        0.95        | 0.99                | 256                  | 0.7     | 8000        |
 | Staging+IDS     | 5e-4          | 1e-4         |        0.99        | 0.99                | 512                  | 0.6     | 10000       |
-| Staging+Staging | 5e-4          | 1e-4         |        0.95        | 0.99                | 512                  | 0.6     | 6000        |
+| Staging+Staging | 5e-4          | 1e-4         |        0.95        | 0.999               | 128                  | 0.5     | 6000        |
 
 Hyperparameters were tuned in 4 stages in which 1-3 individual hyperparameters were altered and the rest were frozen.
 - Stage 1: Learning Rate, Dropout, Max Patches
